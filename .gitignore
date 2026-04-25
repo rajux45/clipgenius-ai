@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+.env
+
+# Node / Next
+node_modules/
+.next/
+.turbo/
+.vercel/
+out/
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local data
+.local-storage/
+clipgenius_storage/
+
+# Test
+.pytest_cache/
+.coverage
+.htmlcov/
+
+# Build artifacts
+dist/
+build/
+
+# Logs
+*.log
