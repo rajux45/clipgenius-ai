@@ -23,8 +23,11 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
+RUN chmod +x /app/start_all.sh
 
 EXPOSE 8000
 
-# Default starts the API; override CMD for the worker / beat services
-CMD ["sh", "-c", "gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w ${WEB_CONCURRENCY:-2} -b 0.0.0.0:${PORT:-8000} --timeout 300"]
+# When BUNDLED_WORKERS=1 (default in start_all.sh) the container runs API +
+# worker + beat together; on multi-service plans you can override CMD with
+# `gunicorn ...` for the API service and `celery ...` for worker/beat.
+CMD ["/app/start_all.sh"]
