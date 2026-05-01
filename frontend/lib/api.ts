@@ -34,6 +34,18 @@ function buildUrl(path: string) {
   return `${API_BASE.replace(/\/$/, "")}${path}`;
 }
 
+// Resolve clip / video media URLs returned by the backend. The API serves
+// local-storage files at relative paths like "/api/v1/files/..." which the
+// browser would otherwise resolve against the page origin (e.g. localhost or
+// the Vercel host) instead of the API host. Pass them through this helper to
+// pin them to the configured API_BASE. S3 URLs (already absolute) are
+// returned as-is.
+export function mediaUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return buildUrl(url);
+}
+
 export async function api<T = unknown>(
   path: string,
   options: RequestInit & { json?: unknown } = {},
