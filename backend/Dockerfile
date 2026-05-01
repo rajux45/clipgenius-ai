@@ -22,6 +22,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
+# Pre-download the faster-whisper model so the worker never has to fetch it
+# at runtime (which would compete for RAM with the rest of the worker on
+# tiny dynos). The 'tiny' model is ~75 MB and lives in the HF cache.
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('tiny', device='cpu', compute_type='int8')"
+
 COPY . .
 RUN chmod +x /app/start_all.sh
 
