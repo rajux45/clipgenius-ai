@@ -185,9 +185,12 @@ def reframe_vertical(input_path: str | Path, output_path: str | Path) -> str:
     else:
         crop_expr = str(max(0, (scaled_w - crop_w) // 2))
 
+    # Commas inside the crop x-expression must be escaped or ffmpeg will treat
+    # them as filter-chain separators. Using \\, escapes them in argv form.
+    safe_expr = crop_expr.replace(",", "\\,")
     vf = (
         f"scale=-2:{VERTICAL_H},"
-        f"crop={VERTICAL_W}:{VERTICAL_H}:{crop_expr}:0,"
+        f"crop={VERTICAL_W}:{VERTICAL_H}:{safe_expr}:0,"
         "setsar=1"
     )
     _run(

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from . import openai_client
+from . import metadata_heuristic, openai_client
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +58,16 @@ def generate_metadata(
         f"Platform rules:\n{hints}\n\n{schema}"
     )
     try:
-        return openai_client.chat_json(system, user)
+        result = openai_client.chat_json(system, user)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Metadata generation failed: %s", exc)
-        return {}
+        log.warning("LLM metadata failed (%s); using heuristic generator", exc)
+        result = {}
+    if not result:
+        result = metadata_heuristic.generate_metadata(
+            platforms=platforms,
+            clip_transcript=clip_transcript,
+            clip_hook=clip_hook,
+            clip_title=clip_title,
+            language=language,
+        )
+    return result

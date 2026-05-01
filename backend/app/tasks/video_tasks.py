@@ -171,7 +171,7 @@ def process_video(self, video_id: str) -> dict:  # noqa: PLR0915
                     try:
                         translated = openai_client.translate(clip_row.transcript or "", lang)
                         dub_audio = clip_dir / f"dub_{lang}.mp3"
-                        openai_client.tts(translated, dub_audio)
+                        openai_client.tts(translated, dub_audio, language=lang)
                         dub_video = clip_dir / f"final_{lang}.mp4"
                         video_processor.replace_audio(
                             final_path, dub_audio, dub_video, keep_original_volume=0.05
