@@ -8,6 +8,7 @@ set -euo pipefail
 
 WORKER_PID=""
 GUNICORN_PID=""
+REDIS_PID=""
 
 shutdown() {
   # Forward SIGTERM to all children we started so they can flush and exit
@@ -18,8 +19,28 @@ shutdown() {
   if [[ -n "${GUNICORN_PID}" ]]; then
     kill -TERM "${GUNICORN_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${REDIS_PID}" ]]; then
+    kill -TERM "${REDIS_PID}" 2>/dev/null || true
+  fi
 }
 trap shutdown TERM INT
+
+# Optional self-hosted redis: when EMBED_REDIS=1 (e.g. on HuggingFace Spaces
+# where there's no managed Redis) we bring up a local redis-server bound to
+# 127.0.0.1:6379 and point Celery at it via REDIS_URL.
+if [[ "${EMBED_REDIS:-0}" == "1" ]] && command -v redis-server >/dev/null 2>&1; then
+  echo "[start_all] launching embedded redis-server on 127.0.0.1:6379"
+  redis-server --daemonize no --bind 127.0.0.1 --port 6379 \
+    --save "" --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru \
+    >/tmp/redis.log 2>&1 &
+  REDIS_PID=$!
+  export REDIS_URL="${REDIS_URL:-redis://127.0.0.1:6379/0}"
+  # Give redis a beat to start accepting connections before celery dials in.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if redis-cli -h 127.0.0.1 ping >/dev/null 2>&1; then break; fi
+    sleep 0.5
+  done
+fi
 
 if [[ "${BUNDLED_WORKERS:-1}" == "1" ]]; then
   echo "[start_all] launching celery worker (with embedded beat) in background"

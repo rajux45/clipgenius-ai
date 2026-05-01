@@ -5,7 +5,10 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# System deps for video processing & opencv
+# System deps for video processing & opencv. redis-server is bundled so the
+# container can run end-to-end on hosts that don't provide a managed Redis
+# (e.g. HuggingFace Spaces) — the in-container instance is only used as the
+# Celery broker when REDIS_URL is unset.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libgl1 \
@@ -15,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrender1 \
         ca-certificates \
         curl \
+        redis-server \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, Enum, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import Uuid as UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -27,9 +27,9 @@ class PostStatus(str, enum.Enum):
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(), primary_key=True, default=uuid.uuid4)
     clip_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("clips.id", ondelete="CASCADE"), index=True
+        UUID(), ForeignKey("clips.id", ondelete="CASCADE"), index=True
     )
     platform: Mapped[Platform] = mapped_column(Enum(Platform, native_enum=False, length=32), nullable=False)
     language: Mapped[str] = mapped_column(String(8), default="en")

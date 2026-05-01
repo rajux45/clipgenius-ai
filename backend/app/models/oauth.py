@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.types import Uuid as UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -14,9 +14,9 @@ class OAuthAccount(Base):
     __tablename__ = "oauth_accounts"
     __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_user_provider"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), index=True
+        UUID(), ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)  # "youtube" | "instagram"
 
