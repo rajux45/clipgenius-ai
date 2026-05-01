@@ -192,9 +192,13 @@ def reframe_vertical(input_path: str | Path, output_path: str | Path) -> str:
         max_off = scaled_w - crop_w
         offsets = [(t, max(0, min(max_off, int(fx * scaled_w - crop_w / 2)))) for t, fx in keyed]
         # Build ladder: if(lt(t,t1),o0, if(lt(t,t2),o1, ...))
+        # Each offset is active until the NEXT keyframe's time, so pair offset
+        # at index i with the timestamp at i+1 as the lt() threshold.
         expr = str(offsets[-1][1])
-        for t, off in reversed(offsets[:-1]):
-            expr = f"if(lt(t,{t:.2f}),{off},{expr})"
+        for i in range(len(offsets) - 2, -1, -1):
+            t_next = offsets[i + 1][0]
+            off = offsets[i][1]
+            expr = f"if(lt(t,{t_next:.2f}),{off},{expr})"
         crop_expr = expr
     else:
         crop_expr = str(max(0, (scaled_w - crop_w) // 2))
