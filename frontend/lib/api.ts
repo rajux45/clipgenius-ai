@@ -1,6 +1,10 @@
 "use client";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
+// Fallback to the public HuggingFace Space backend so the deployed Vercel
+// site keeps working even if NEXT_PUBLIC_API_URL hasn't been set in the
+// dashboard yet. Override at build time with NEXT_PUBLIC_API_URL.
+const DEFAULT_API_BASE = "https://rah7809-clipgenius-api.hf.space";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE;
 const TOKEN_KEY = "clipgenius_token";
 
 export class ApiError extends Error {

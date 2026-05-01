@@ -53,7 +53,8 @@ export default function UploadPage() {
         if (title) fd.append("title", title);
         fd.append("languages", languages.join(","));
         fd.append("platforms", platforms.join(","));
-        const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
+        const apiBase =
+          process.env.NEXT_PUBLIC_API_URL || "https://rah7809-clipgenius-api.hf.space";
         const res = await fetch(`${apiBase}/api/v1/videos/upload`, {
           method: "POST",
           headers: { Authorization: `Bearer ${getToken()}` },
