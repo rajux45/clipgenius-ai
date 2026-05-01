@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -15,8 +16,16 @@ import cv2
 
 log = logging.getLogger(__name__)
 
-VERTICAL_W = 1080
-VERTICAL_H = 1920
+# 9:16 vertical render size. On tiny dynos (Render free, 0.1 vCPU / 512 MB)
+# encoding 1080x1920 takes 30-60x realtime; rendering at 720x1280 cuts that
+# roughly 4x and is still well above what Reels/Shorts compress down to.
+# Override via VIDEO_RENDER_HEIGHT env var (e.g. 1920 on real hardware).
+VERTICAL_H = int(os.environ.get("VIDEO_RENDER_HEIGHT", "1280"))
+VERTICAL_W = int(round(VERTICAL_H * 9 / 16))
+
+# x264 preset; ultrafast is ~5x faster than veryfast at slightly lower quality.
+FFMPEG_PRESET = os.environ.get("FFMPEG_PRESET", "ultrafast")
+FFMPEG_THREADS = os.environ.get("FFMPEG_THREADS", "1")
 
 
 def _run(cmd: list[str]) -> None:
@@ -67,9 +76,11 @@ def cut_segment(input_path: str | Path, output_path: str | Path, start: float, e
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
             "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "aac",
             "-b:a",
@@ -92,6 +103,9 @@ class FaceTrack:
 
 
 def _detect_face_track(video_path: str | Path, sample_fps: float = 2.0) -> FaceTrack:
+    if os.environ.get("DISABLE_FACE_TRACKING", "").strip() in {"1", "true", "yes"}:
+        return FaceTrack([], [])
+    sample_fps = float(os.environ.get("FACE_TRACK_SAMPLE_FPS", str(sample_fps)))
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return FaceTrack([], [])
@@ -204,9 +218,11 @@ def reframe_vertical(input_path: str | Path, output_path: str | Path) -> str:
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
-            "21",
+            "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "copy",
             "-movflags",
@@ -323,9 +339,11 @@ def burn_captions(input_path: str | Path, output_path: str | Path, ass_path: str
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
-            "21",
+            "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "copy",
             "-movflags",
