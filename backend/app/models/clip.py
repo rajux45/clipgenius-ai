@@ -5,8 +5,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
-from sqlalchemy.types import Uuid as UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import Uuid as UUID
 
 from ..database import Base
 
