@@ -69,22 +69,21 @@ def transcribe(audio_path: str | Path) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def translate(text: str, target_language: str) -> str:
+def translate(text: str, target_language: str, source_language: str = "auto") -> str:
     if not text.strip():
         return ""
-    if target_language.startswith("en"):
-        return text  # source assumed English
+    target = target_language.split("-")[0].lower()
+    source = source_language.split("-")[0].lower() if source_language else "auto"
+    if source != "auto" and source == target:
+        return text
     from deep_translator import GoogleTranslator  # noqa: WPS433 (deferred import)
 
-    # GoogleTranslator wants 2-letter codes (es, hi, fr, ...). yt-dlp / OpenAI
-    # may send "es-ES" so split on hyphen.
-    target = target_language.split("-")[0].lower()
     try:
         # The free endpoint chokes on >5k chars, so chunk by sentence boundary.
         chunks = _split_into_chunks(text, max_chars=4500)
         out = []
         for chunk in chunks:
-            out.append(GoogleTranslator(source="auto", target=target).translate(chunk))
+            out.append(GoogleTranslator(source=source, target=target).translate(chunk))
         return " ".join(p for p in out if p)
     except Exception as exc:  # noqa: BLE001
         log.warning("deep-translator failed (%s); returning original text", exc)
@@ -162,5 +161,22 @@ def tts(text: str, output_path: str | Path, voice: str | None = None, language: 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     chosen_voice = voice or _voice_for(language)
     log.info("edge-tts synthesising (%s, voice=%s, %d chars)", language, chosen_voice, len(text))
-    asyncio.run(_edge_save(text, str(output_path), chosen_voice))
+    _run_async(_edge_save(text, str(output_path), chosen_voice))
     return str(output_path)
+
+
+def _run_async(coro: Any) -> None:
+    """Run an async coroutine to completion from sync code, even if a loop is
+    already running on the current thread (e.g. inside an async FastAPI route
+    that calls into the OpenAI facade and falls back to the free stack)."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None or not loop.is_running():
+        asyncio.run(coro)
+        return
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(asyncio.run, coro).result()
