@@ -20,8 +20,8 @@ log = logging.getLogger(__name__)
 # encoding 1080x1920 takes 30-60x realtime; rendering at 720x1280 cuts that
 # roughly 4x and is still well above what Reels/Shorts compress down to.
 # Override via VIDEO_RENDER_HEIGHT env var (e.g. 1920 on real hardware).
-VERTICAL_H = int(os.environ.get("VIDEO_RENDER_HEIGHT", "1280"))
-VERTICAL_W = int(round(VERTICAL_H * 9 / 16))
+VERTICAL_H = int(os.environ.get("VIDEO_RENDER_HEIGHT", "1280")) & ~1
+VERTICAL_W = int(round(VERTICAL_H * 9 / 16)) & ~1  # libx264 needs even dims
 
 # x264 preset; ultrafast is ~5x faster than veryfast at slightly lower quality.
 FFMPEG_PRESET = os.environ.get("FFMPEG_PRESET", "ultrafast")
