@@ -399,13 +399,13 @@ def segments_to_srt(segments: Iterable[dict]) -> str:
     def _fmt(t: float) -> str:
         if t < 0:
             t = 0.0
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
-        s = int(t % 60)
-        ms = int(round((t - int(t)) * 1000))
-        if ms == 1000:
-            s += 1
-            ms = 0
+        # Round to integer milliseconds first, then decompose, so values like
+        # 59.9996 don't produce "00:00:60,000" (invalid SRT). Players treat
+        # that malformed timestamp as 0 and drop the caption.
+        total_ms = int(round(t * 1000))
+        h, rem = divmod(total_ms, 3600 * 1000)
+        m, rem = divmod(rem, 60 * 1000)
+        s, ms = divmod(rem, 1000)
         return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
     out: list[str] = []
