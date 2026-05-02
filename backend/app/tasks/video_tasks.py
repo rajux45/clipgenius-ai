@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import uuid
 from pathlib import Path
 
@@ -129,23 +130,20 @@ def process_video(self, video_id: str) -> dict:  # noqa: PLR0915
                 clip_dir = workdir / f"clip_{idx}"
                 clip_dir.mkdir(exist_ok=True)
                 cut_path = clip_dir / "cut.mp4"
-                tight_path = clip_dir / "tight.mp4"
                 vert_path = clip_dir / "vertical.mp4"
+                captioned_path = clip_dir / "captioned.mp4"
                 final_path = clip_dir / "final.mp4"
                 ass_path = clip_dir / "captions.ass"
                 srt_path = clip_dir / "captions.srt"
                 thumb_path = clip_dir / "thumb.jpg"
 
                 video_processor.cut_segment(local_input, cut_path, moment["start"], moment["end"])
-                # Silence-cut: trim long pauses so the final clip feels tight.
-                # Falls back to a plain copy if no silences are detected.
-                try:
-                    video_processor.trim_silences(cut_path, tight_path, min_silence_sec=0.7, pad_sec=0.1)
-                    source_for_reframe = tight_path
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("silence-cut failed (%s); using raw cut", exc)
-                    source_for_reframe = cut_path
-                video_processor.reframe_vertical(source_for_reframe, vert_path)
+                # Reframe on the raw cut so the caption timestamps (which come
+                # from the original transcript timeline) stay in sync. Silence
+                # trimming happens AFTER captions are burned so the subtitle
+                # pixels travel with their frames (fixes Devin Review BUG_0001:
+                # captions were desynced when silences were removed first).
+                video_processor.reframe_vertical(cut_path, vert_path)
 
                 # Build clip-relative segments (with word timestamps when
                 # available) for karaoke caption rendering. If a word's times
@@ -192,7 +190,21 @@ def process_video(self, video_id: str) -> dict:  # noqa: PLR0915
                 srt_path.write_text(
                     video_processor.segments_to_srt(clip_segments), encoding="utf-8"
                 )
-                video_processor.burn_captions(vert_path, final_path, ass_path)
+                # Burn captions onto the original-timeline reframed video
+                # first, THEN run silence trimming. Because trim_silences cuts
+                # both audio and video together, the burned subtitle pixels
+                # travel with their frames and stay in sync with speech.
+                video_processor.burn_captions(vert_path, captioned_path, ass_path)
+                try:
+                    video_processor.trim_silences(
+                        captioned_path,
+                        final_path,
+                        min_silence_sec=0.7,
+                        pad_sec=0.1,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("silence-cut failed (%s); using captioned clip as-is", exc)
+                    shutil.copy2(captioned_path, final_path)
                 video_processor.extract_thumbnail(final_path, thumb_path, at=0.5)
 
                 # Upload final + thumbnail + srt
