@@ -41,13 +41,20 @@ def _load_whisper() -> Any:
 
 def transcribe(audio_path: str | Path) -> dict:
     """Transcribe audio using faster-whisper. Returns the same shape as the
-    OpenAI Whisper wrapper so callers don't care which backend ran."""
+    OpenAI Whisper wrapper so callers don't care which backend ran.
+
+    When ``WHISPER_WORD_TIMESTAMPS`` is enabled (default), each segment also
+    gets a ``words`` list with per-word ``(start, end, word)`` used by the
+    karaoke-caption renderer.
+    """
     model = _load_whisper()
+    want_words = os.environ.get("WHISPER_WORD_TIMESTAMPS", "1").strip() in {"1", "true", "yes"}
     segments_iter, info = model.transcribe(
         str(audio_path),
         beam_size=1,
         vad_filter=True,
         vad_parameters={"min_silence_duration_ms": 500},
+        word_timestamps=want_words,
     )
     segments: list[dict] = []
     text_parts: list[str] = []
@@ -55,7 +62,22 @@ def transcribe(audio_path: str | Path) -> dict:
         text = (seg.text or "").strip()
         if not text:
             continue
-        segments.append({"start": float(seg.start), "end": float(seg.end), "text": text})
+        words: list[dict] = []
+        for w in getattr(seg, "words", None) or []:
+            w_text = (getattr(w, "word", "") or "").strip()
+            if not w_text:
+                continue
+            words.append(
+                {
+                    "start": float(getattr(w, "start", seg.start) or seg.start),
+                    "end": float(getattr(w, "end", seg.end) or seg.end),
+                    "word": w_text,
+                }
+            )
+        entry = {"start": float(seg.start), "end": float(seg.end), "text": text}
+        if words:
+            entry["words"] = words
+        segments.append(entry)
         text_parts.append(text)
     return {
         "language": info.language or "en",
