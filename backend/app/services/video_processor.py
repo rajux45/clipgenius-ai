@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import subprocess
 import tempfile
@@ -15,8 +16,16 @@ import cv2
 
 log = logging.getLogger(__name__)
 
-VERTICAL_W = 1080
-VERTICAL_H = 1920
+# 9:16 vertical render size. On tiny dynos (Render free, 0.1 vCPU / 512 MB)
+# encoding 1080x1920 takes 30-60x realtime; rendering at 720x1280 cuts that
+# roughly 4x and is still well above what Reels/Shorts compress down to.
+# Override via VIDEO_RENDER_HEIGHT env var (e.g. 1920 on real hardware).
+VERTICAL_H = int(os.environ.get("VIDEO_RENDER_HEIGHT", "1280")) & ~1
+VERTICAL_W = int(round(VERTICAL_H * 9 / 16)) & ~1  # libx264 needs even dims
+
+# x264 preset; ultrafast is ~5x faster than veryfast at slightly lower quality.
+FFMPEG_PRESET = os.environ.get("FFMPEG_PRESET", "ultrafast")
+FFMPEG_THREADS = os.environ.get("FFMPEG_THREADS", "1")
 
 
 def _run(cmd: list[str]) -> None:
@@ -67,9 +76,11 @@ def cut_segment(input_path: str | Path, output_path: str | Path, start: float, e
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
             "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "aac",
             "-b:a",
@@ -92,6 +103,9 @@ class FaceTrack:
 
 
 def _detect_face_track(video_path: str | Path, sample_fps: float = 2.0) -> FaceTrack:
+    if os.environ.get("DISABLE_FACE_TRACKING", "").strip() in {"1", "true", "yes"}:
+        return FaceTrack([], [])
+    sample_fps = float(os.environ.get("FACE_TRACK_SAMPLE_FPS", str(sample_fps)))
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         return FaceTrack([], [])
@@ -178,16 +192,23 @@ def reframe_vertical(input_path: str | Path, output_path: str | Path) -> str:
         max_off = scaled_w - crop_w
         offsets = [(t, max(0, min(max_off, int(fx * scaled_w - crop_w / 2)))) for t, fx in keyed]
         # Build ladder: if(lt(t,t1),o0, if(lt(t,t2),o1, ...))
+        # Each offset is active until the NEXT keyframe's time, so pair offset
+        # at index i with the timestamp at i+1 as the lt() threshold.
         expr = str(offsets[-1][1])
-        for t, off in reversed(offsets[:-1]):
-            expr = f"if(lt(t,{t:.2f}),{off},{expr})"
+        for i in range(len(offsets) - 2, -1, -1):
+            t_next = offsets[i + 1][0]
+            off = offsets[i][1]
+            expr = f"if(lt(t,{t_next:.2f}),{off},{expr})"
         crop_expr = expr
     else:
         crop_expr = str(max(0, (scaled_w - crop_w) // 2))
 
+    # Commas inside the crop x-expression must be escaped or ffmpeg will treat
+    # them as filter-chain separators. Using \\, escapes them in argv form.
+    safe_expr = crop_expr.replace(",", "\\,")
     vf = (
         f"scale=-2:{VERTICAL_H},"
-        f"crop={VERTICAL_W}:{VERTICAL_H}:{crop_expr}:0,"
+        f"crop={VERTICAL_W}:{VERTICAL_H}:{safe_expr}:0,"
         "setsar=1"
     )
     _run(
@@ -201,9 +222,11 @@ def reframe_vertical(input_path: str | Path, output_path: str | Path) -> str:
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
-            "21",
+            "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "copy",
             "-movflags",
@@ -252,15 +275,11 @@ def _split_caption_lines(text: str, max_chars_per_line: int = 18, max_lines: int
     return [c for c in cues if c]
 
 
-def build_caption_ass(
-    segments: Iterable[dict],
-    *,
-    width: int = VERTICAL_W,
-    height: int = VERTICAL_H,
-    highlight_words: set[str] | None = None,
-) -> str:
-    """Generate an .ass subtitle string with bold uppercase captions and yellow highlight on keywords."""
-    style = (
+def _ass_header(width: int, height: int, *, karaoke: bool = False) -> str:
+    # Karaoke uses a punchier style (larger, tighter outline) because it
+    # draws attention to the active word rather than whole lines.
+    fontsize = 84 if karaoke else 72
+    return (
         "[Script Info]\n"
         "ScriptType: v4.00+\n"
         f"PlayResX: {width}\nPlayResY: {height}\n"
@@ -269,10 +288,21 @@ def build_caption_ass(
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        "Style: Default,Inter,72,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,200,1\n\n"
+        f"Style: Default,Inter,{fontsize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,4,2,2,40,40,200,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
+
+
+def build_caption_ass(
+    segments: Iterable[dict],
+    *,
+    width: int = VERTICAL_W,
+    height: int = VERTICAL_H,
+    highlight_words: set[str] | None = None,
+) -> str:
+    """Generate an .ass subtitle string with bold uppercase captions and yellow highlight on keywords."""
+    style = _ass_header(width, height, karaoke=False)
 
     highlight_words = {w.lower() for w in (highlight_words or set())}
     lines: list[str] = []
@@ -304,6 +334,228 @@ def build_caption_ass(
     return style + "\n".join(lines) + "\n"
 
 
+def build_karaoke_ass(
+    segments: Iterable[dict],
+    *,
+    width: int = VERTICAL_W,
+    height: int = VERTICAL_H,
+    max_words_per_cue: int = 4,
+) -> str:
+    """Karaoke-style captions: each cue shows a few words at a time; the active
+    word is highlighted in yellow while surrounding words stay white. Requires
+    each segment to have a ``words`` list of ``{start, end, word}``; falls back
+    to the block renderer when word timing is missing.
+    """
+    segments = list(segments)
+    has_words = any(s.get("words") for s in segments)
+    if not has_words:
+        return build_caption_ass(segments, width=width, height=height)
+
+    style = _ass_header(width, height, karaoke=True)
+    lines: list[str] = []
+
+    highlight_color = "{\\c&H00F2FF&}"  # yellow (ASS is BGR)
+    normal_color = "{\\c&HFFFFFF&}"
+
+    for seg in segments:
+        words = seg.get("words") or []
+        if not words:
+            continue
+        # Group words into small cues (max_words_per_cue) so we never show
+        # more text than a viewer can read in a second or two.
+        for i in range(0, len(words), max_words_per_cue):
+            chunk = words[i : i + max_words_per_cue]
+            chunk_start = float(chunk[0]["start"])
+            chunk_end = float(chunk[-1]["end"])
+            if chunk_end <= chunk_start:
+                chunk_end = chunk_start + 0.4
+            # For each word in the chunk, emit a separate dialogue line that
+            # is active only while that word is being spoken — with the rest
+            # of the cue text rendered in white around it. This is simpler
+            # than ASS \k karaoke tags and works on every ffmpeg build.
+            for j, w in enumerate(chunk):
+                ws = float(w["start"])
+                we = float(w["end"])
+                if we <= ws:
+                    we = ws + 0.15
+                parts: list[str] = []
+                for k, other in enumerate(chunk):
+                    text = (other["word"] or "").strip().upper()
+                    text = text.replace("{", "(").replace("}", ")")
+                    if k == j:
+                        parts.append(highlight_color + text + normal_color)
+                    else:
+                        parts.append(text)
+                text_line = " ".join(parts)
+                lines.append(
+                    f"Dialogue: 0,{_format_ass_time(ws)},{_format_ass_time(we)},Default,,0,0,0,,{text_line}"
+                )
+    return style + "\n".join(lines) + "\n"
+
+
+def segments_to_srt(segments: Iterable[dict]) -> str:
+    """Render transcript segments as a standard SRT subtitle block."""
+
+    def _fmt(t: float) -> str:
+        if t < 0:
+            t = 0.0
+        h = int(t // 3600)
+        m = int((t % 3600) // 60)
+        s = int(t % 60)
+        ms = int(round((t - int(t)) * 1000))
+        if ms == 1000:
+            s += 1
+            ms = 0
+        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+    out: list[str] = []
+    i = 1
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        if not text:
+            continue
+        start = float(seg.get("start", 0.0))
+        end = float(seg.get("end", start + 1.5))
+        out.append(str(i))
+        out.append(f"{_fmt(start)} --> {_fmt(end)}")
+        out.append(text)
+        out.append("")
+        i += 1
+    return "\n".join(out).strip() + "\n"
+
+
+# --- Silence cut --------------------------------------------------------------
+
+
+def detect_silences(
+    input_path: str | Path,
+    *,
+    min_silence_sec: float = 0.7,
+    noise_db: float = -32.0,
+) -> list[tuple[float, float]]:
+    """Use ffmpeg's silencedetect filter to return a list of (start, end)
+    windows that are silent. Parses stderr output."""
+    cmd = [
+        "ffmpeg",
+        "-nostats",
+        "-hide_banner",
+        "-i",
+        str(input_path),
+        "-af",
+        f"silencedetect=noise={noise_db}dB:d={min_silence_sec}",
+        "-f",
+        "null",
+        "-",
+    ]
+    res = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    out = res.stderr or ""
+    silences: list[tuple[float, float]] = []
+    pending_start: float | None = None
+    for line in out.splitlines():
+        if "silence_start" in line:
+            try:
+                pending_start = float(line.split("silence_start:")[1].strip().split()[0])
+            except (IndexError, ValueError):
+                pending_start = None
+        elif "silence_end" in line and pending_start is not None:
+            try:
+                end = float(line.split("silence_end:")[1].strip().split(" ")[0])
+            except (IndexError, ValueError):
+                end = pending_start
+            silences.append((pending_start, end))
+            pending_start = None
+    return silences
+
+
+def trim_silences(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    min_silence_sec: float = 0.7,
+    pad_sec: float = 0.1,
+) -> str:
+    """Cut out silent pauses >= ``min_silence_sec`` from the input and re-encode
+    the resulting speech-only clip. Leaves ``pad_sec`` of silence around each
+    kept region so the audio doesn't sound abruptly jump-cut.
+
+    Returns ``output_path``. Falls back to copying the input unchanged if no
+    silences are detected so callers don't have to branch.
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        total = get_duration(input_path)
+    except Exception:  # noqa: BLE001
+        shutil.copy2(input_path, output_path)
+        return str(output_path)
+
+    silences = detect_silences(
+        input_path, min_silence_sec=min_silence_sec, noise_db=-32.0
+    )
+    if not silences:
+        shutil.copy2(input_path, output_path)
+        return str(output_path)
+
+    # Build keep-intervals = complement of silences, padded inward.
+    keeps: list[tuple[float, float]] = []
+    cursor = 0.0
+    for s, e in silences:
+        keep_end = max(cursor, s + pad_sec)
+        if keep_end > cursor + 0.2:
+            keeps.append((cursor, keep_end))
+        cursor = max(keep_end, e - pad_sec)
+    if cursor < total - 0.05:
+        keeps.append((cursor, total))
+
+    if not keeps or (len(keeps) == 1 and keeps[0][1] - keeps[0][0] >= total - 0.2):
+        shutil.copy2(input_path, output_path)
+        return str(output_path)
+
+    # Build an ffmpeg filter_complex that concatenates all keep intervals.
+    parts_v: list[str] = []
+    parts_a: list[str] = []
+    for i, (s, e) in enumerate(keeps):
+        parts_v.append(f"[0:v]trim=start={s:.3f}:end={e:.3f},setpts=PTS-STARTPTS[v{i}]")
+        parts_a.append(f"[0:a]atrim=start={s:.3f}:end={e:.3f},asetpts=PTS-STARTPTS[a{i}]")
+    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(len(keeps)))
+    filter_complex = (
+        ";".join(parts_v + parts_a)
+        + f";{concat_inputs}concat=n={len(keeps)}:v=1:a=1[vout][aout]"
+    )
+    _run(
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(input_path),
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vout]",
+            "-map",
+            "[aout]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            FFMPEG_PRESET,
+            "-crf",
+            "23",
+            "-threads",
+            FFMPEG_THREADS,
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
+    return str(output_path)
+
+
 def burn_captions(input_path: str | Path, output_path: str | Path, ass_path: str | Path) -> str:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,9 +572,11 @@ def burn_captions(input_path: str | Path, output_path: str | Path, ass_path: str
             "-c:v",
             "libx264",
             "-preset",
-            "veryfast",
+            FFMPEG_PRESET,
             "-crf",
-            "21",
+            "23",
+            "-threads",
+            FFMPEG_THREADS,
             "-c:a",
             "copy",
             "-movflags",

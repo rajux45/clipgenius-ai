@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import toast from "react-hot-toast";
-import { api } from "@/lib/api";
+import { api, mediaUrl } from "@/lib/api";
 import type { Clip, Platform } from "@/lib/types";
 import { fmtDuration, statusColor } from "@/lib/utils";
 import { Calendar, Edit3, Save, X, Youtube, Instagram } from "lucide-react";
@@ -26,7 +26,9 @@ export default function ClipCard({
   const [scheduledAt, setScheduledAt] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const videoUrl = clip.dubs?.[language]?.url || clip.dubs?.[language]?.s3_key || clip.s3_key;
+  const rawVideoUrl =
+    clip.dubs?.[language]?.url || clip.dubs?.[language]?.s3_key || clip.s3_key;
+  const videoUrl = mediaUrl(rawVideoUrl);
 
   async function save() {
     setSaving(true);

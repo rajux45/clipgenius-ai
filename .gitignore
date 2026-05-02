@@ -33,6 +33,7 @@ clipgenius_storage/
 # Build artifacts
 dist/
 build/
+*.tsbuildinfo
 
 # Logs
 *.log

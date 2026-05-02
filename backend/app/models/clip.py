@@ -5,8 +5,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import Uuid as UUID
 
 from ..database import Base
 
@@ -22,9 +22,9 @@ class ClipStatus(str, enum.Enum):
 class Clip(Base):
     __tablename__ = "clips"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(), primary_key=True, default=uuid.uuid4)
     video_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("videos.id", ondelete="CASCADE"), index=True
+        UUID(), ForeignKey("videos.id", ondelete="CASCADE"), index=True
     )
 
     index: Mapped[int] = mapped_column(Integer, nullable=False)  # 0..N

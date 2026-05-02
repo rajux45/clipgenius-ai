@@ -19,7 +19,12 @@ def _normalise_database_url(url: str) -> str:
 
 SYNC_DATABASE_URL = _normalise_database_url(settings.database_url)
 
-engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=5, max_overflow=10)
+if SYNC_DATABASE_URL.startswith("sqlite"):
+    # SQLite needs check_same_thread=False because FastAPI background workers
+    # and Celery share the same connection pool across threads.
+    engine = create_engine(SYNC_DATABASE_URL, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(SYNC_DATABASE_URL, pool_pre_ping=True, pool_size=5, max_overflow=10)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
